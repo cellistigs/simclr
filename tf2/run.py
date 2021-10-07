@@ -30,7 +30,6 @@ import tensorflow.compat.v2 as tf
 import tensorflow_datasets as tfds
 
 
-
 FLAGS = flags.FLAGS
 
 
@@ -335,8 +334,6 @@ def try_restore_from_checkpoint(model, global_step, optimizer):
         x.assign(tf.zeros_like(x))
 
   return checkpoint_manager
-
-
 def json_serializable(val):
   try:
     json.dumps(val)
