@@ -28,7 +28,7 @@ import model as model_lib
 import objective as obj_lib
 import tensorflow.compat.v2 as tf
 import tensorflow_datasets as tfds
-import ssl_videodata.ssl_datasets.twomouse
+from ssl_videodata.ssl_datasets import twomouse
 
 
 FLAGS = flags.FLAGS
@@ -549,117 +549,128 @@ def main(argv):
       # Restore checkpoint if available.
       checkpoint_manager = try_restore_from_checkpoint(
           model, optimizer.iterations, optimizer)
+      model_var = build_saved_model(model).variables
+      
+      session = tf.compat.v1.Session()
+      saver = tf.compat.v1.train.Saver(var_list=model_var)
+      saver.save(session,os.path.join(FLAGS.model_dir,os.path.basename(FLAGS.checkpoint)+"tf_1_conv"),global_step=0)
 
-    steps_per_loop = checkpoint_steps
+      #saved = build_saved_model(checkpoint_manager.checkpoint.model)
+  print("model saved.")    
+  for metric in all_metrics:
+      metric.reset_states()
 
-    def single_step(features, labels):
-      with tf.GradientTape() as tape:
-        # Log summaries on the last step of the training loop to match
-        # logging frequency of other scalar summaries.
-        #
-        # Notes:
-        # 1. Summary ops on TPUs get outside compiled so they do not affect
-        #    performance.
-        # 2. Summaries are recorded only on replica 0. So effectively this
-        #    summary would be written once per host when should_record == True.
-        # 3. optimizer.iterations is incremented in the call to apply_gradients.
-        #    So we use  `iterations + 1` here so that the step number matches
-        #    those of scalar summaries.
-        # 4. We intentionally run the summary op before the actual model
-        #    training so that it can run in parallel.
-        should_record = tf.equal((optimizer.iterations + 1) % steps_per_loop, 0)
-        with tf.summary.record_if(should_record):
-          # Only log augmented images for the first tower.
-          tf.summary.image(
-              'image', features[:, :, :, :3], step=optimizer.iterations + 1)
-        projection_head_outputs, supervised_head_outputs = model(
-            features, training=True)
-        loss = None
-        if projection_head_outputs is not None:
-          outputs = projection_head_outputs
-          con_loss, logits_con, labels_con = obj_lib.add_contrastive_loss(
-              outputs,
-              hidden_norm=FLAGS.hidden_norm,
-              temperature=FLAGS.temperature,
-              strategy=strategy)
-          if loss is None:
-            loss = con_loss
-          else:
-            loss += con_loss
-          metrics.update_pretrain_metrics_train(contrast_loss_metric,
-                                                contrast_acc_metric,
-                                                contrast_entropy_metric,
-                                                con_loss, logits_con,
-                                                labels_con)
-        if supervised_head_outputs is not None:
-          outputs = supervised_head_outputs
-          l = labels['labels']
-          if FLAGS.train_mode == 'pretrain' and FLAGS.lineareval_while_pretraining:
-            l = tf.concat([l, l], 0)
-          sup_loss = obj_lib.add_supervised_loss(labels=l, logits=outputs)
-          if loss is None:
-            loss = sup_loss
-          else:
-            loss += sup_loss
-          metrics.update_finetune_metrics_train(supervised_loss_metric,
-                                                supervised_acc_metric, sup_loss,
-                                                l, outputs)
-        weight_decay = model_lib.add_weight_decay(
-            model, adjust_per_optimizer=True)
-        weight_decay_metric.update_state(weight_decay)
-        loss += weight_decay
-        total_loss_metric.update_state(loss)
-        # The default behavior of `apply_gradients` is to sum gradients from all
-        # replicas so we divide the loss by the number of replicas so that the
-        # mean gradient is applied.
-        loss = loss / strategy.num_replicas_in_sync
-        logging.info('Trainable variables:')
-        for var in model.trainable_variables:
-          logging.info(var.name)
-        grads = tape.gradient(loss, model.trainable_variables)
-        optimizer.apply_gradients(zip(grads, model.trainable_variables))
 
-    with strategy.scope():
+  #  steps_per_loop = checkpoint_steps
 
-      @tf.function
-      def train_multiple_steps(iterator):
-        # `tf.range` is needed so that this runs in a `tf.while_loop` and is
-        # not unrolled.
-        for _ in tf.range(steps_per_loop):
-          # Drop the "while" prefix created by tf.while_loop which otherwise
-          # gets prefixed to every variable name. This does not affect training
-          # but does affect the checkpoint conversion script.
-          # TODO(b/161712658): Remove this.
-          with tf.name_scope(''):
-            images, labels = next(iterator)
-            features, labels = images, {'labels': labels}
-            strategy.run(single_step, (features, labels))
+  #  def single_step(features, labels):
+  #    with tf.GradientTape() as tape:
+  #      # Log summaries on the last step of the training loop to match
+  #      # logging frequency of other scalar summaries.
+  #      #
+  #      # Notes:
+  #      # 1. Summary ops on TPUs get outside compiled so they do not affect
+  #      #    performance.
+  #      # 2. Summaries are recorded only on replica 0. So effectively this
+  #      #    summary would be written once per host when should_record == True.
+  #      # 3. optimizer.iterations is incremented in the call to apply_gradients.
+  #      #    So we use  `iterations + 1` here so that the step number matches
+  #      #    those of scalar summaries.
+  #      # 4. We intentionally run the summary op before the actual model
+  #      #    training so that it can run in parallel.
+  #      should_record = tf.equal((optimizer.iterations + 1) % steps_per_loop, 0)
+  #      with tf.summary.record_if(should_record):
+  #        # Only log augmented images for the first tower.
+  #        tf.summary.image(
+  #            'image', features[:, :, :, :3], step=optimizer.iterations + 1)
+  #      projection_head_outputs, supervised_head_outputs = model(
+  #          features, training=True)
+  #      loss = None
+  #      if projection_head_outputs is not None:
+  #        outputs = projection_head_outputs
+  #        con_loss, logits_con, labels_con = obj_lib.add_contrastive_loss(
+  #            outputs,
+  #            hidden_norm=FLAGS.hidden_norm,
+  #            temperature=FLAGS.temperature,
+  #            strategy=strategy)
+  #        if loss is None:
+  #          loss = con_loss
+  #        else:
+  #          loss += con_loss
+  #        metrics.update_pretrain_metrics_train(contrast_loss_metric,
+  #                                              contrast_acc_metric,
+  #                                              contrast_entropy_metric,
+  #                                              con_loss, logits_con,
+  #                                              labels_con)
+  #      if supervised_head_outputs is not None:
+  #        outputs = supervised_head_outputs
+  #        l = labels['labels']
+  #        if FLAGS.train_mode == 'pretrain' and FLAGS.lineareval_while_pretraining:
+  #          l = tf.concat([l, l], 0)
+  #        sup_loss = obj_lib.add_supervised_loss(labels=l, logits=outputs)
+  #        if loss is None:
+  #          loss = sup_loss
+  #        else:
+  #          loss += sup_loss
+  #        metrics.update_finetune_metrics_train(supervised_loss_metric,
+  #                                              supervised_acc_metric, sup_loss,
+  #                                              l, outputs)
+  #      weight_decay = model_lib.add_weight_decay(
+  #          model, adjust_per_optimizer=True)
+  #      weight_decay_metric.update_state(weight_decay)
+  #      loss += weight_decay
+  #      total_loss_metric.update_state(loss)
+  #      # The default behavior of `apply_gradients` is to sum gradients from all
+  #      # replicas so we divide the loss by the number of replicas so that the
+  #      # mean gradient is applied.
+  #      loss = loss / strategy.num_replicas_in_sync
+  #      logging.info('Trainable variables:')
+  #      for var in model.trainable_variables:
+  #        logging.info(var.name)
+  #      grads = tape.gradient(loss, model.trainable_variables)
+  #      optimizer.apply_gradients(zip(grads, model.trainable_variables))
 
-      global_step = optimizer.iterations
-      cur_step = global_step.numpy()
-      iterator = iter(ds)
-      while cur_step < train_steps:
-        # Calls to tf.summary.xyz lookup the summary writer resource which is
-        # set by the summary writer's context manager.
-        with summary_writer.as_default():
-          train_multiple_steps(iterator)
-          cur_step = global_step.numpy()
-          checkpoint_manager.save(cur_step)
-          logging.info('Completed: %d / %d steps', cur_step, train_steps)
-          metrics.log_and_write_metrics_to_summary(all_metrics, cur_step)
-          tf.summary.scalar(
-              'learning_rate',
-              learning_rate(tf.cast(global_step, dtype=tf.float32)),
-              global_step)
-          summary_writer.flush()
-        for metric in all_metrics:
-          metric.reset_states()
-      logging.info('Training complete...')
+  #  with strategy.scope():
 
-    if FLAGS.mode == 'train_then_eval':
-      perform_evaluation(model, builder, eval_steps,
-                         checkpoint_manager.latest_checkpoint, strategy,
-                         topology)
+  #    @tf.function
+  #    def train_multiple_steps(iterator):
+  #      # `tf.range` is needed so that this runs in a `tf.while_loop` and is
+  #      # not unrolled.
+  #      for _ in tf.range(steps_per_loop):
+  #        # Drop the "while" prefix created by tf.while_loop which otherwise
+  #        # gets prefixed to every variable name. This does not affect training
+  #        # but does affect the checkpoint conversion script.
+  #        # TODO(b/161712658): Remove this.
+  #        with tf.name_scope(''):
+  #          images, labels = next(iterator)
+  #          features, labels = images, {'labels': labels}
+  #          strategy.run(single_step, (features, labels))
+
+  #    global_step = optimizer.iterations
+  #    cur_step = global_step.numpy()
+  #    iterator = iter(ds)
+  #    while cur_step < train_steps:
+  #      # Calls to tf.summary.xyz lookup the summary writer resource which is
+  #      # set by the summary writer's context manager.
+  #      with summary_writer.as_default():
+  #        train_multiple_steps(iterator)
+  #        cur_step = global_step.numpy()
+  #        checkpoint_manager.save(cur_step)
+  #        logging.info('Completed: %d / %d steps', cur_step, train_steps)
+  #        metrics.log_and_write_metrics_to_summary(all_metrics, cur_step)
+  #        tf.summary.scalar(
+  #            'learning_rate',
+  #            learning_rate(tf.cast(global_step, dtype=tf.float32)),
+  #            global_step)
+  #        summary_writer.flush()
+  #      for metric in all_metrics:
+  #        metric.reset_states()
+  #    logging.info('Training complete...')
+
+  #  if FLAGS.mode == 'train_then_eval':
+  #    perform_evaluation(model, builder, eval_steps,
+  #                       checkpoint_manager.latest_checkpoint, strategy,
+  #                       topology)
 
 
 if __name__ == '__main__':
