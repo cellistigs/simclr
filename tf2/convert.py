@@ -505,8 +505,7 @@ def main(argv):
     logging.info('Running using MirroredStrategy on %d replicas',
                  strategy.num_replicas_in_sync)
 
-  with strategy.scope():
-    model = model_lib.Model(num_classes)
+  model = model_lib.Model(num_classes)
 
   if FLAGS.mode == 'eval':
     for ckpt in tf.train.checkpoints_iterator(
@@ -518,44 +517,43 @@ def main(argv):
         return
   else:
     summary_writer = tf.summary.create_file_writer(FLAGS.model_dir)
-    with strategy.scope():
-      # Build input pipeline.
-      ds = data_lib.build_distributed_dataset(builder, FLAGS.train_batch_size,
-                                              True, strategy, topology)
+    # Build input pipeline.
+    ds = data_lib.build_distributed_dataset(builder, FLAGS.train_batch_size,
+                                            True, strategy, topology)
 
-      # Build LR schedule and optimizer.
-      learning_rate = model_lib.WarmUpAndCosineDecay(FLAGS.learning_rate,
-                                                     num_train_examples)
-      optimizer = model_lib.build_optimizer(learning_rate)
+    # Build LR schedule and optimizer.
+    learning_rate = model_lib.WarmUpAndCosineDecay(FLAGS.learning_rate,
+                                                   num_train_examples)
+    optimizer = model_lib.build_optimizer(learning_rate)
 
-      # Build metrics.
-      all_metrics = []  # For summaries.
-      weight_decay_metric = tf.keras.metrics.Mean('train/weight_decay')
-      total_loss_metric = tf.keras.metrics.Mean('train/total_loss')
-      all_metrics.extend([weight_decay_metric, total_loss_metric])
-      if FLAGS.train_mode == 'pretrain':
-        contrast_loss_metric = tf.keras.metrics.Mean('train/contrast_loss')
-        contrast_acc_metric = tf.keras.metrics.Mean('train/contrast_acc')
-        contrast_entropy_metric = tf.keras.metrics.Mean(
-            'train/contrast_entropy')
-        all_metrics.extend([
-            contrast_loss_metric, contrast_acc_metric, contrast_entropy_metric
-        ])
-      if FLAGS.train_mode == 'finetune' or FLAGS.lineareval_while_pretraining:
-        supervised_loss_metric = tf.keras.metrics.Mean('train/supervised_loss')
-        supervised_acc_metric = tf.keras.metrics.Mean('train/supervised_acc')
-        all_metrics.extend([supervised_loss_metric, supervised_acc_metric])
+    # Build metrics.
+    all_metrics = []  # For summaries.
+    weight_decay_metric = tf.keras.metrics.Mean('train/weight_decay')
+    total_loss_metric = tf.keras.metrics.Mean('train/total_loss')
+    all_metrics.extend([weight_decay_metric, total_loss_metric])
+    if FLAGS.train_mode == 'pretrain':
+      contrast_loss_metric = tf.keras.metrics.Mean('train/contrast_loss')
+      contrast_acc_metric = tf.keras.metrics.Mean('train/contrast_acc')
+      contrast_entropy_metric = tf.keras.metrics.Mean(
+          'train/contrast_entropy')
+      all_metrics.extend([
+          contrast_loss_metric, contrast_acc_metric, contrast_entropy_metric
+      ])
+    if FLAGS.train_mode == 'finetune' or FLAGS.lineareval_while_pretraining:
+      supervised_loss_metric = tf.keras.metrics.Mean('train/supervised_loss')
+      supervised_acc_metric = tf.keras.metrics.Mean('train/supervised_acc')
+      all_metrics.extend([supervised_loss_metric, supervised_acc_metric])
 
-      # Restore checkpoint if available.
-      checkpoint_manager = try_restore_from_checkpoint(
-          model, optimizer.iterations, optimizer)
-      model_var = build_saved_model(model).variables
-      
-      session = tf.compat.v1.Session()
-      saver = tf.compat.v1.train.Saver(var_list=model_var)
-      saver.save(session,os.path.join(FLAGS.model_dir,os.path.basename(FLAGS.checkpoint)+"tf_1_conv"),global_step=0)
+    # Restore checkpoint if available.
+    checkpoint_manager = try_restore_from_checkpoint(
+        model, optimizer.iterations, optimizer)
+    model_var = build_saved_model(model).variables
+    
+    session = tf.compat.v1.Session()
+    saver = tf.compat.v1.train.Saver(var_list=model_var)
+    saver.save(session,os.path.join(FLAGS.model_dir,os.path.basename(FLAGS.checkpoint)+"tf_1_conv"),global_step=0)
 
-      #saved = build_saved_model(checkpoint_manager.checkpoint.model)
+    #saved = build_saved_model(checkpoint_manager.checkpoint.model)
   print("model saved.")    
   for metric in all_metrics:
       metric.reset_states()
