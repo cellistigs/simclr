@@ -550,6 +550,7 @@ def main(argv):
       checkpoint_manager = try_restore_from_checkpoint(
           model, optimizer.iterations, optimizer)
       model_var = build_saved_model(model).variables
+      import pdb; pdb.set_trace()
       
       session = tf.compat.v1.Session()
       saver = tf.compat.v1.train.Saver(var_list=model_var)
